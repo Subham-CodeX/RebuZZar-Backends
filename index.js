@@ -59,7 +59,10 @@ cloudinary.config({
 // GLOBAL MIDDLEWARE
 // ----------------------------
 app.use(helmet());
-app.use(cors({ origin: process.env.CORS_ORIGIN || '*' }));
+app.use(cors({
+  origin: "http://localhost:5173", // 👈 your frontend dev URL
+  credentials: true,
+}));
 app.use(express.json({ limit: '10kb' }));
 app.use(passport.initialize());
 
@@ -80,6 +83,25 @@ const authLimiter = rateLimit({
 });
 
 // ----------------------------
+// ✅ DEFAULT ROOT ROUTE (Fixes "Cannot GET /")
+// ----------------------------
+app.get('/', (req, res) => {
+  res.status(200).send(`
+    <h1>🚀 RebuZZar Backend API</h1>
+    <p>Server is running successfully.</p>
+    <h3>Available API Endpoints:</h3>
+    <ul>
+      <li><code>GET /api/products</code> → Fetch all approved products</li>
+      <li><code>POST /api/auth/signup</code> → Register a new user</li>
+      <li><code>POST /api/auth/login</code> → Login existing user</li>
+      <li><code>GET /api/cart</code> → Fetch user cart</li>
+      <li><code>POST /api/bookings/create</code> → Create a booking</li>
+    </ul>
+    <p>💡 Developed by <strong>Subham</strong> — RebuZZar Project</p>
+  `);
+});
+
+
 // DATABASE CONNECTION
 // ----------------------------
 mongoose.connect(process.env.MONGO_URI)
