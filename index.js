@@ -82,6 +82,7 @@ const authLimiter = rateLimit({
   message: { message: 'Too many requests from this IP, try again later.' },
 });
 
+
 // ----------------------------
 // ✅ DEFAULT ROOT ROUTE (Fixes "Cannot GET /")
 // ----------------------------
@@ -150,6 +151,8 @@ const ProductSchema = new mongoose.Schema({
   isBooked: { type: Boolean, default: false },
 }, { timestamps: true });
 
+
+
 // BOOKING
 const BookingSchema = new mongoose.Schema({
   buyerId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
@@ -207,6 +210,34 @@ CartSchema.pre('save', function (next) {
 });
 
 const Cart = mongoose.model('Cart', CartSchema);
+
+// ----------------------------
+// ----------------------------
+// This model stores ad submissions, manual UPI payment proof, approval state, and expiry.
+const AdvertisementSchema = new mongoose.Schema({
+  title: { type: String, required: true },
+  description: { type: String, required: true },
+  images: [{ type: String }], // Cloudinary URLs
+  businessName: { type: String, required: true },
+  contactPhone: { type: String, required: true },
+  contactEmail: { type: String, required: true },
+  ownerId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+
+  // Manual payment fields (UPI screenshot or txn id)
+  paymentUPI: { type: String }, // store UPI id used (optional)
+  paymentProof: { type: String }, // cloudinary URL for screenshot
+  amountPaid: { type: Number, default: 0 },
+
+  // Workflow / approval
+  status: { type: String, enum: ['pending', 'approved', 'rejected', 'expired'], default: 'pending' },
+  requestedDuration: { type: Number, default: 7 }, // in days (requested by user)
+  approvedAt: { type: Date },
+  expiresAt: { type: Date },
+  adminNotes: { type: String },
+
+}, { timestamps: true });
+
+const Advertisement = mongoose.model('Advertisement', AdvertisementSchema);
 
 // ----------------------------
 // MULTER + CLOUDINARY STORAGE
@@ -270,6 +301,11 @@ const authMiddleware = async (req, res, next) => {
     if (!user) return res.status(403).json({ message: 'Invalid or unknown user token.' });
 
     req.userId = user._id;
+    req.user = { 
+    id: user._id.toString(), 
+    role: user.role, 
+    email: user.email 
+    }; // 🔥 This line fixes My Ads
     next();
   } catch (err) {
     // fallback
@@ -320,6 +356,228 @@ passport.use(
 // ROUTES: helper
 // ----------------------------
 const asyncHandler = fn => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
+
+// ============================================================================
+// ADVERTISEMENT ROUTES (PART B)
+// ============================================================================
+
+// Separate Cloudinary storage for advertisement files
+const adStorage = new CloudinaryStorage({
+  cloudinary,
+  params: {
+    folder: "rebuzzar-ads",
+    allowed_formats: ["jpg", "jpeg", "png", "webp"],
+  },
+});
+
+const adUpload = multer({
+  storage: adStorage,
+  limits: { fileSize: 5 * 1024 * 1024 },
+});
+
+// -------------------------------------------------------------
+// USER — CREATE ADVERTISEMENT
+// -------------------------------------------------------------
+app.post(
+  "/api/ads/create",
+  authMiddleware,
+  adUpload.fields([
+    { name: "images", maxCount: 5 },
+    { name: "paymentProof", maxCount: 1 }
+  ]),
+  asyncHandler(async (req, res) => {
+    try {
+      const {
+        title,
+        description,
+        businessName,
+        contactPhone,
+        contactEmail,
+        paymentUPI,
+        amountPaid,
+        requestedDuration,
+      } = req.body;
+
+      const images = (req.files["images"] || []).map((file) => file.path);
+      const paymentProof = req.files["paymentProof"]
+        ? req.files["paymentProof"][0].path
+        : null;
+
+      const ad = await Advertisement.create({
+        title,
+        description,
+        businessName,
+        contactPhone,
+        contactEmail,
+        ownerId: req.userId,
+        paymentUPI,
+        amountPaid: Number(amountPaid) || 0,
+        requestedDuration: Number(requestedDuration) || 7,
+        images,
+        paymentProof,
+        status: "pending",
+      });
+
+      res.json({ success: true, message: "Advertisement submitted!", ad });
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ message: "Error creating advertisement." });
+    }
+  })
+);
+
+// -------------------------------------------------------------
+// USER — VIEW OWN ADVERTISEMENTS
+// -------------------------------------------------------------
+app.get(
+  "/api/ads/my",
+  authMiddleware,
+  asyncHandler(async (req, res) => {
+    const ads = await Advertisement.find({
+      ownerId: req.userId,
+    }).sort({ createdAt: -1 });
+
+    res.json({ success: true, ads });
+  })
+);
+app.get(
+  "/api/ads/my",
+  authMiddleware,
+  asyncHandler(async (req, res) => {
+    const ads = await Advertisement.find({ ownerId: req.userId })
+      .sort({ createdAt: -1 });
+    res.json({ success: true, ads });
+  })
+);
+// -------------------------------------------------------------
+// PUBLIC — FETCH APPROVED & ACTIVE ADS
+// -------------------------------------------------------------
+app.get(
+  "/api/ads/public",
+  asyncHandler(async (req, res) => {
+    const ads = await Advertisement.find({
+      status: "approved",
+    })
+      .sort({ approvedAt: -1, createdAt: -1 });
+
+    res.json({ success: true, ads });
+  })
+);
+
+// -------------------------------------------------------------
+// ADMIN — VIEW ALL PENDING ADVERTISEMENTS
+// -------------------------------------------------------------
+app.get(
+  "/api/admin/ads/pending",
+  authMiddleware,
+  adminMiddleware,
+  asyncHandler(async (req, res) => {
+    const pending = await Advertisement.find({ status: "pending" })
+      .populate("ownerId", "name email")
+      .sort({ createdAt: 1 });
+
+    res.json({ success: true, pending });
+  })
+);
+
+// -------------------------------------------------------------
+// ADMIN — APPROVE ADVERTISEMENT
+// -------------------------------------------------------------
+app.post(
+  "/api/admin/ads/approve/:id",
+  authMiddleware,
+  adminMiddleware,
+  asyncHandler(async (req, res) => {
+    const { id } = req.params;
+
+    const ad = await Advertisement.findById(id);
+    if (!ad) return res.status(404).json({ message: "Advertisement not found" });
+
+    const now = new Date();
+    const durationDays = ad.requestedDuration || 7;
+
+    ad.status = "approved";
+    ad.approvedAt = now;
+    ad.expiresAt = new Date(now.getTime() + durationDays * 24 * 60 * 60 * 1000);
+
+    await ad.save();
+
+    res.json({ success: true, message: "Advertisement Approved!", ad });
+  })
+);
+
+// -------------------------------------------------------------
+// ADMIN — REJECT ADVERTISEMENT
+// -------------------------------------------------------------
+app.post(
+  "/api/admin/ads/reject/:id",
+  authMiddleware,
+  adminMiddleware,
+  asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    const { reason } = req.body;
+
+    const ad = await Advertisement.findById(id);
+    if (!ad) return res.status(404).json({ message: "Advertisement not found" });
+
+    ad.status = "rejected";
+    ad.adminNotes = reason || "Not Approved By Admin";
+
+    await ad.save();
+
+    res.json({ success: true, message: "Advertisement Rejected!", ad });
+  })
+);
+
+// -------------------------------------------------------------
+// USER — REQUEST EXTENSION
+// -------------------------------------------------------------
+app.post(
+  "/api/ads/extend/:id",
+  authMiddleware,
+  adUpload.single("paymentProof"),
+  asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    const { extraDays, amountPaid } = req.body;
+
+    const ad = await Advertisement.findById(id);
+
+    if (!ad) return res.status(404).json({ message: "Ad not found" });
+    if (String(ad.ownerId) !== String(req.userId))
+      return res.status(403).json({ message: "Unauthorized" });
+
+    // mark as pending again until admin approves
+    ad.status = "pending";
+    ad.requestedDuration = Number(extraDays) || 7;
+    ad.amountPaid += Number(amountPaid) || 0;
+
+    if (req.file) {
+      ad.paymentProof = req.file.path;
+    }
+
+    await ad.save();
+    res.json({ success: true, message: "Extension Request Submitted!", ad });
+  })
+);
+
+// ----------------------------
+// AUTO EXPIRE ADVERTISEMENTS (CRON JOB)
+// Runs everyday at midnight to mark ads as expired
+// ----------------------------
+const cron = require("node-cron");
+
+cron.schedule("0 0 * * *", async () => {
+  try {
+    const now = new Date();
+    await Advertisement.updateMany(
+      { status: "approved", expiresAt: { $lte: now } },
+      { $set: { status: "expired" } }
+    );
+    console.log("⏳ Expired ads updated successfully");
+  } catch (err) {
+    console.error("Error updating expired ads:", err);
+  }
+});
 
 // ----------------------------
 // PROFILE ROUTES
@@ -446,6 +704,8 @@ app.delete('/api/products/:id', authMiddleware, asyncHandler(async (req, res) =>
   await Product.findByIdAndDelete(req.params.id);
   res.json({ message: 'Product deleted successfully.' });
 }));
+
+
 
 // ----------------------------
 // ADMIN ROUTES
@@ -1114,6 +1374,8 @@ app.use((err, req, res, next) => {
   res.status(status).json({ message: err.message || 'Internal Server Error' });
 });
 
+
+// -------------------------
 // ----------------------------
 // START SERVER
 // ----------------------------
