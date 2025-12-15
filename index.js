@@ -156,8 +156,14 @@ const ProductSchema = new mongoose.Schema({
 // BOOKING
 const BookingSchema = new mongoose.Schema({
   buyerId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+  buyerName: { type: String, required: true },
+  buyerEmail: { type: String, required: true },
   products: [{
-    productId: { type: mongoose.Schema.Types.ObjectId, ref: 'Product', required: true },
+     productId: { type: mongoose.Schema.Types.ObjectId, ref: 'Product', required: true },
+    title: { type: String, required: true },
+    sellerId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+    sellerName: { type: String, required: true },
+    sellerEmail: {type: String, required: true },
     quantity: { type: Number, required: true, default: 1 },
     price: { type: Number, required: true }
   }],
@@ -974,6 +980,17 @@ const transporter = nodemailer.createTransport({
   }
 });
 
+const sendMailSafe = async (options) => {
+  try {
+    await transporter.sendMail(options);
+    return true;
+  } catch (err) {
+    console.error("📧 Email failed:", err?.message || err);
+    return false;
+  }
+};
+
+
 // ----------------------------
 // BOOKING ROUTES
 // ----------------------------
@@ -1161,96 +1178,97 @@ app.get('/api/bookings/:id', authMiddleware, asyncHandler(async (req, res) => {
 app.put('/api/bookings/:id/cancel', authMiddleware, async (req, res) => {
   try {
     const booking = await Booking.findById(req.params.id)
-    .populate('buyerId', 'name email')
-    .populate('products.productId', 'title price sellerId');
+      .populate('buyerId', 'name email')
+      .populate({
+        path: 'products.productId',
+        select: 'title price sellerId',
+        populate: { path: 'sellerId', select: 'name email' }
+      });
 
-    if (!booking) {
+    if (!booking)
       return res.status(404).json({ message: 'Booking not found.' });
-    }
-
-    // ✅ Ensure only the booking owner can cancel
-    if (booking.buyerId._id.toString() !== req.userId.toString()) {
+    if (booking.buyerId._id.toString() !== req.userId.toString())
       return res.status(403).json({ message: 'Not authorized to cancel this booking.' });
-    }
 
-    // ✅ Prevent cancelling already cancelled or delivered bookings
-    if (['Cancelled', 'Delivered'].includes(booking.status)) {
-      return res.status(400).json({ message: `Cannot cancel a ${booking.status.toLowerCase()} booking.` });
-    }
+    if (['Cancelled', 'Delivered'].includes(booking.status))
+      return res.status(400).json({ message: 'Cannot cancel this booking.' });
 
+    // ✅ Cancel booking
     booking.status = 'Cancelled';
     await booking.save();
 
-    // 🟢 Mark all related products as available again
-    const productIds = booking.products.map(p => p.productId);
+    // ✅ Restore product availability
+    const productIds = booking.products.map(p => p.productId._id);
     await Product.updateMany(
       { _id: { $in: productIds } },
       { $set: { isBooked: false } }
     );
 
-    // ✅ Get seller info
-  const sellerIds = booking.products.map(p => p.productId.sellerId);
-  const sellers = await User.find({ _id: { $in: sellerIds } }, 'name email');
+    // =========================
+    // 📧 EMAIL NOTIFICATIONS
+    // =========================
 
-  // ✅ Setup mail transporter
-  const transporter = nodemailer.createTransport({
-    host: process.env.EMAIL_HOST,
-    port: Number(process.env.EMAIL_PORT) || 587,
-    secure: process.env.EMAIL_SECURE === 'true',
-    auth: { user: process.env.EMAIL_USER, pass: process.env.EMAIL_PASS },
-  });
+    const itemsHTML = booking.products
+      .map(p => `<li>${p.productId.title} — ₹${p.productId.price}</li>`)
+      .join('');
 
-  // ✅ Email content
-  const buyerMail = {
-    from: process.env.EMAIL_FROM,
-    to: booking.buyerId.email,
-    subject: 'Booking Cancelled - RebuZZar',
-    html: `
-      <h2>Booking Cancelled</h2>
-      <p>Hi ${booking.buyerId.name},</p>
-      <p>Your booking for the following items has been cancelled:</p>
-      <ul>
-        ${booking.products.map(p => `<li>${p.productId.title} - ₹${p.productId.price}</li>`).join('')}
-      </ul>
-      <p>If this wasn’t you, please contact RebuZZar Support.</p>
-    `,
-  };
-
-  // Send mail to each seller
-  for (const seller of sellers) {
-    await transporter.sendMail({
+    // ---- Buyer ----
+    sendMailSafe({
       from: process.env.EMAIL_FROM,
-      to: seller.email,
-      subject: 'Item Booking Cancelled - RebuZZar',
+      to: booking.buyerId.email,
+      subject: 'Booking Cancelled - RebuZZar',
       html: `
-        <h2>Your Item Has Been Cancelled</h2>
-        <p>Hi ${seller.name},</p>
-        <p>The following item(s) booked from your listing have been cancelled by the buyer:</p>
-        <ul>
-          ${booking.products.map(p => `<li>${p.productId.title} - ₹${p.productId.price}</li>`).join('')}
-        </ul>
-        <p>You will be notified later about the next steps for pickup rescheduling.</p>
-      `,
+        <h3>Hello ${booking.buyerId.name},</h3>
+        <p>Your booking has been cancelled successfully.</p>
+        <ul>${itemsHTML}</ul>
+        <p>— RebuZZar Team</p>
+      `
     });
-  }
 
-  // ✅ Notify admin
-  await transporter.sendMail({
-    from: process.env.EMAIL_FROM,
-    to: process.env.ADMIN_EMAIL,
-    subject: 'Booking Cancelled - RebuZZar Admin Notice',
-    html: `
-      <h2>Booking Cancelled</h2>
-      <p><strong>Buyer:</strong> ${booking.buyerId.name} (${booking.buyerId.email})</p>
-      <p><strong>Items:</strong></p>
-      <ul>
-        ${booking.products.map(p => `<li>${p.productId.title} - ₹${p.productId.price}</li>`).join('')}
-      </ul>
-    `,
-  });
+    // ---- Sellers (grouped correctly) ----
+    const sellerMap = new Map();
+
+    booking.products.forEach(p => {
+      const seller = p.productId.sellerId;
+      if (!seller?.email) return;
+
+      if (!sellerMap.has(seller.email)) {
+        sellerMap.set(seller.email, {
+          name: seller.name,
+          items: []
+        });
+      }
+      sellerMap.get(seller.email).items.push(p.productId.title);
+    });
+
+    for (const [email, data] of sellerMap.entries()) {
+      sendMailSafe({
+        from: process.env.EMAIL_FROM,
+        to: email,
+        subject: 'Booking Cancelled for Your Item - RebuZZar',
+        html: `
+          <h3>Hello ${data.name},</h3>
+          <p>The following item(s) were cancelled:</p>
+          <ul>${data.items.map(i => `<li>${i}</li>`).join('')}</ul>
+          <p>Your item is now available again.</p>
+        `
+      });
+    }
+
+    // ---- Admin ----
+    sendMailSafe({
+      from: process.env.EMAIL_FROM,
+      to: process.env.ADMIN_EMAIL,
+      subject: 'Booking Cancelled (Admin Alert)',
+      html: `
+        <p><strong>Buyer:</strong> ${booking.buyerId.name}</p>
+        <p><strong>Email:</strong> ${booking.buyerId.email}</p>
+        <ul>${itemsHTML}</ul>
+      `
+    });
 
     res.status(200).json({
-      message: 'Booking cancelled successfully. Product(s) are now available again.',
+      message: 'Booking cancelled successfully.',
       booking
     });
 
@@ -1259,6 +1277,7 @@ app.put('/api/bookings/:id/cancel', authMiddleware, async (req, res) => {
     res.status(500).json({ message: 'Internal server error' });
   }
 });
+
 
 // ----------------------------
 // CART ROUTES
