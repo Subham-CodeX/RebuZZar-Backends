@@ -40,10 +40,6 @@ exports.createProduct = async (req, res) => {
 
   const seller = await User.findById(req.user.id).select('name email');
   if (!seller) return res.status(404).json({ message: 'Seller not found' });
-//  console.log('🔥 CREATE PRODUCT HIT');
-// console.log('BODY:', req.body);
-// console.log('FILES:', req.files);
-// console.log('USER:', req.user);
 
   const product = await Product.create({
     title: req.body.title,
@@ -58,8 +54,26 @@ exports.createProduct = async (req, res) => {
     status: 'pending', // SAME LOGIC
   });
 
+  // Product upload mail
+const { sendMailSafe } = require('../utils/mailer');
+
+await sendMailSafe({
+  to: seller.email,
+  subject: 'Product uploaded – Under review',
+  html: `
+    <p>Hi ${seller.name},</p>
+    <p>Your product <b>${product.title}</b> has been uploaded successfully.</p>
+    <p>It is currently under admin verification.</p>
+    <p>You will be notified once it is approved or rejected.</p>
+    <p>Thank you for selling on RebuZZar.</p>
+    <br/>
+    <p>– RebuZZar Team</p>
+  `,
+});
+
   res.status(201).json(product);
 };
+
 
 exports.deleteProduct = async (req, res) => {
   const product = await Product.findById(req.params.id);

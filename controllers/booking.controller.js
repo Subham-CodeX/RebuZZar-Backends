@@ -2,9 +2,11 @@ const mongoose = require('mongoose');
 const Booking = require('../models/Booking');
 const Product = require('../models/Product');
 const User = require('../models/User');
-const nodemailer = require('nodemailer');
 const { sendMailSafe } = require('../utils/mailer');
 
+// =======================
+// CREATE BOOKING
+// =======================
 exports.createBooking = async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
@@ -39,13 +41,15 @@ exports.createBooking = async (req, res) => {
       await product.save({ session });
     }
 
-    // Fetch products snapshot
+    // Fetch product snapshot
     const dbProducts = await Product.find({
       _id: { $in: products.map(p => p.productId) },
     }).session(session);
 
     const bookingProducts = dbProducts.map(p => {
-      const cartItem = products.find(i => String(i.productId) === String(p._id));
+      const cartItem = products.find(
+        i => String(i.productId) === String(p._id)
+      );
       return {
         productId: p._id,
         title: p.title,
@@ -73,23 +77,27 @@ exports.createBooking = async (req, res) => {
     await session.commitTransaction();
     session.endSession();
 
-    // ---------------- EMAILS ----------------
-    const transporter = nodemailer.createTransport({
-      host: process.env.EMAIL_HOST,
-      port: Number(process.env.EMAIL_PORT),
-      secure: process.env.EMAIL_SECURE === 'true',
-      auth: {
-        user: process.env.EMAIL_USER,
-        pass: process.env.EMAIL_PASS,
-      },
-    });
+    // =======================
+    // BOOKING SUCCESS EMAIL
+    // =======================
+    const productList = booking.products
+      .map(p => `<li>${p.title} × ${p.quantity}</li>`)
+      .join('');
 
-    // Buyer mail
-    await transporter.sendMail({
+    await sendMailSafe({
       to: buyer.email,
-      from: process.env.EMAIL_FROM,
-      subject: 'Booking Confirmation — RebuZZar',
-      html: `<p>Booking ID: ${booking._id}</p>`,
+      subject: 'Booking successful 🛒',
+      html: `
+        <p>Hi ${buyer.name},</p>
+        <p>Your booking was successful.</p>
+        <ul>${productList}</ul>
+        <p><b>Total:</b> ₹${booking.totalPrice}</p>
+        <p>You will receive your product within <b>48 hours</b>.</p>
+        <br/>
+        <p>Thanks for shopping on <b>RebuZZar</b>!</p>
+        <br/>
+        <p>– RebuZZar Team</p>
+      `,
     });
 
     res.status(201).json({
@@ -107,6 +115,9 @@ exports.createBooking = async (req, res) => {
   }
 };
 
+// =======================
+// GET MY BOOKINGS
+// =======================
 exports.getMyBookings = async (req, res) => {
   const bookings = await Booking.find({ buyerId: req.user.id })
     .populate('products.productId', 'title imageUrl')
@@ -115,6 +126,9 @@ exports.getMyBookings = async (req, res) => {
   res.json(bookings);
 };
 
+// =======================
+// GET BOOKING BY ID
+// =======================
 exports.getBookingById = async (req, res) => {
   const booking = await Booking.findById(req.params.id)
     .populate('products.productId', 'title imageUrl price')
@@ -126,6 +140,9 @@ exports.getBookingById = async (req, res) => {
   res.json(booking);
 };
 
+// =======================
+// CANCEL BOOKING
+// =======================
 exports.cancelBooking = async (req, res) => {
   const booking = await Booking.findById(req.params.id)
     .populate('buyerId', 'name email')
@@ -153,11 +170,27 @@ exports.cancelBooking = async (req, res) => {
     });
   }
 
-  sendMailSafe({
+  // =======================
+  // BOOKING CANCEL EMAIL
+  // =======================
+  const productList = booking.products
+    .map(p => `<li>${p.title} × ${p.quantity}</li>`)
+    .join('');
+
+  await sendMailSafe({
     to: booking.buyerId.email,
-    from: process.env.EMAIL_FROM,
-    subject: 'Booking Cancelled',
-    html: '<p>Your booking was cancelled.</p>',
+    subject: 'Booking cancelled',
+    html: `
+      <p>Your booking has been cancelled on ${new Date().toDateString()}.</p>
+      <ul>${productList}</ul>
+      <p>
+        Visit <a href="${process.env.FRONTEND_URL}">
+          RebuZZar
+        </a> to continue shopping.
+      </p>
+      <br/>
+      <p>– RebuZZar Team</p>
+    `,
   });
 
   res.json({ message: 'Booking cancelled.', booking });

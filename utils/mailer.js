@@ -1,29 +1,29 @@
-// utils/mailer.js
 const nodemailer = require('nodemailer');
-
-const mailPort = Number(process.env.EMAIL_PORT) || 465;
 
 const transporter = nodemailer.createTransport({
   host: process.env.EMAIL_HOST,
-  port: mailPort,
-  secure: process.env.EMAIL_SECURE === 'true' || mailPort === 465,
+  port: Number(process.env.EMAIL_PORT),
+  secure: process.env.EMAIL_SECURE === 'true',
   auth: {
     user: process.env.EMAIL_USER,
     pass: process.env.EMAIL_PASS,
   },
 });
 
-const sendMailSafe = async options => {
+exports.sendMailSafe = async ({ to, subject, html }) => {
   try {
-    await transporter.sendMail(options);
-    return true;
+    await transporter.sendMail({
+      from: process.env.EMAIL_FROM,
+      to,
+      subject,
+      html,
+    });
   } catch (err) {
-    console.error('📧 Email failed:', err?.message || err);
-    return false;
+    console.error('EMAIL ERROR:', err.message);
   }
 };
 
-module.exports = {
-  transporter,
-  sendMailSafe,
-};
+// module.exports = {
+//   transporter,
+//   sendMailSafe,
+// };
