@@ -2,10 +2,13 @@
 const router = require('express').Router();
 const auth = require('../middlewares/auth.middleware');
 const adUpload = require('../middlewares/adUpload.middleware');
-
 const adController = require('../controllers/ad.controller');
 
-// User
+// =======================
+// USER ROUTES
+// =======================
+
+// Create advertisement
 router.post(
   '/create',
   auth,
@@ -16,13 +19,22 @@ router.post(
   adController.createAd
 );
 
+// Get my advertisements
 router.get('/my', auth, adController.getMyAds);
-router.get('/public', adController.getPublicAds);
+
+// Extend advertisement
 router.post(
   '/extend/:id',
   auth,
   adUpload.single('paymentProof'),
   adController.extendAd
 );
+
+// =======================
+// PUBLIC ROUTES
+// =======================
+
+// Get approved ads for public
+router.get('/public', adController.getPublicAds);
 
 module.exports = router;

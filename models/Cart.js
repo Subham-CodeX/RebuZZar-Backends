@@ -3,18 +3,24 @@ const mongoose = require('mongoose');
 
 const CartItemSchema = new mongoose.Schema(
   {
+    // Product snapshot
     productId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Product',
       required: true,
     },
-
-    title: { type: String, required: true },
-
-    price: { type: Number, required: true },
-
-    imageUrl: { type: [String], default: [] },
-
+    productTitle: {
+      type: String,
+      required: true,
+    },
+    productImage: {
+      type: String,
+      default: '',
+    },
+    price: {
+      type: Number,
+      required: true,
+    },
     quantity: {
       type: Number,
       required: true,
@@ -22,9 +28,19 @@ const CartItemSchema = new mongoose.Schema(
       default: 1,
     },
 
+    // Seller snapshot
     sellerId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',
+      required: true,
+    },
+    sellerName: {
+      type: String,
+      required: true,
+    },
+    sellerEmail: {
+      type: String,
+      required: true,
     },
   },
   { _id: false }
@@ -32,16 +48,23 @@ const CartItemSchema = new mongoose.Schema(
 
 const CartSchema = new mongoose.Schema(
   {
-    userId: {
+    // Buyer snapshot
+    buyerId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',
       required: true,
       unique: true,
     },
+    buyerName: {
+      type: String,
+      required: true,
+    },
+    buyerEmail: {
+      type: String,
+      required: true,
+    },
 
     items: [CartItemSchema],
-
-    updatedAt: { type: Date, default: Date.now },
   },
   { timestamps: true }
 );

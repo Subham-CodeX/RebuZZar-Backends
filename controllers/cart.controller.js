@@ -1,15 +1,16 @@
 const Cart = require('../models/Cart');
 const Product = require('../models/Product');
+const User = require('../models/User');
 
 // =======================
 // GET CART
 // =======================
 exports.getCart = async (req, res) => {
-  let cart = await Cart.findOne({ userId: req.user.id });
+  let cart = await Cart.findOne({ buyerId: req.user.id });
 
   if (!cart) {
-    cart = await Cart.create({
-      userId: req.user.id,
+    return res.json({
+      buyerId: req.user.id,
       items: [],
     });
   }
@@ -22,57 +23,67 @@ exports.getCart = async (req, res) => {
 // =======================
 exports.addToCart = async (req, res) => {
   try {
-    // 🔒 HARD GUARD (prevents crash)
     if (!req.body || typeof req.body !== 'object') {
       return res.status(400).json({ message: 'Invalid request body' });
     }
 
-    const productId = req.body.productId;
+    const { productId } = req.body;
     const quantity = Number(req.body.quantity) || 1;
 
     if (!productId) {
       return res.status(400).json({ message: 'productId is required' });
     }
 
+    // Buyer
+    const buyer = await User.findById(req.user.id).select('name email');
+    if (!buyer) {
+      return res.status(404).json({ message: 'Buyer not found' });
+    }
+
+    // Product + Seller
     const product = await Product.findOne({
       _id: productId,
       status: 'approved',
       quantity: { $gt: 0 },
-    });
+    }).populate('sellerId', 'name email');
 
     if (!product) {
       return res.status(404).json({ message: 'Product not available' });
     }
 
-    let cart = await Cart.findOne({ userId: req.user.id });
+    let cart = await Cart.findOne({ buyerId: buyer._id });
 
     if (!cart) {
       cart = new Cart({
-        userId: req.user.id,
+        buyerId: buyer._id,
+        buyerName: buyer.name,
+        buyerEmail: buyer.email,
         items: [],
       });
     }
 
-    const index = cart.items.findIndex(
-      item => item.productId.toString() === productId
+    const existingItem = cart.items.find(
+      item => item.productId.toString() === product._id.toString()
     );
 
-    if (index > -1) {
-      cart.items[index].quantity += quantity;
+    if (existingItem) {
+      existingItem.quantity += quantity;
     } else {
       cart.items.push({
         productId: product._id,
-        title: product.title,
+        productTitle: product.title,
+        productImage: product.imageUrl?.[0] || '',
         price: product.price,
-        imageUrl: product.imageUrl,
         quantity,
-        sellerId: product.sellerId,
+
+        sellerId: product.sellerId._id,
+        sellerName: product.sellerId.name,
+        sellerEmail: product.sellerId.email,
       });
     }
 
     await cart.save();
 
-    // 🔁 IMPORTANT: match frontend expectation
     res.json({ cart });
   } catch (err) {
     console.error('ADD TO CART ERROR:', err);
@@ -80,12 +91,11 @@ exports.addToCart = async (req, res) => {
   }
 };
 
-
 // =======================
 // UPDATE CART ITEM
 // =======================
 exports.updateCartItem = async (req, res) => {
-  const cart = await Cart.findOne({ userId: req.user.id });
+  const cart = await Cart.findOne({ buyerId: req.user.id });
   if (!cart) return res.status(404).json({ message: 'Cart not found' });
 
   const item = cart.items.find(
@@ -95,26 +105,25 @@ exports.updateCartItem = async (req, res) => {
   if (!item)
     return res.status(404).json({ message: 'Item not found in cart' });
 
-  item.quantity = Number(req.body.quantity);
+  const qty = Number(req.body.quantity);
 
-  // optional: auto-remove if quantity <= 0
-  if (item.quantity <= 0) {
+  if (qty <= 0) {
     cart.items = cart.items.filter(
       i => i.productId.toString() !== req.params.productId
     );
+  } else {
+    item.quantity = qty;
   }
 
   await cart.save();
-
-  res.json({ cart }); // ✅ IMPORTANT
+  res.json({ cart });
 };
-
 
 // =======================
 // REMOVE CART ITEM
 // =======================
 exports.removeCartItem = async (req, res) => {
-  const cart = await Cart.findOne({ userId: req.user.id });
+  const cart = await Cart.findOne({ buyerId: req.user.id });
   if (!cart) return res.status(404).json({ message: 'Cart not found' });
 
   cart.items = cart.items.filter(
@@ -122,21 +131,18 @@ exports.removeCartItem = async (req, res) => {
   );
 
   await cart.save();
-
-  res.json({ cart }); // ✅ IMPORTANT
+  res.json({ cart });
 };
-
 
 // =======================
 // CLEAR CART
 // =======================
 exports.clearCart = async (req, res) => {
-  const cart = await Cart.findOne({ userId: req.user.id });
+  const cart = await Cart.findOne({ buyerId: req.user.id });
   if (!cart) return res.status(404).json({ message: 'Cart not found' });
 
   cart.items = [];
   await cart.save();
 
-  res.json({ cart }); // ✅ IMPORTANT
+  res.json({ cart });
 };
-

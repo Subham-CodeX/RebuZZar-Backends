@@ -1,3 +1,4 @@
+// controllers/ad.controller.js
 const Advertisement = require('../models/Advertisement');
 const User = require('../models/User');
 const { sendMailSafe } = require('../utils/mailer');
@@ -6,74 +7,87 @@ const { sendMailSafe } = require('../utils/mailer');
 // CREATE ADVERTISEMENT
 // =======================
 exports.createAd = async (req, res) => {
-  console.log('BODY:', req.body);
-  console.log('FILES:', req.files);
-  console.log('USER:', req.user.id);
+  try {
+    const {
+      title,
+      description,
+      businessName,
+      contactPhone,
+      contactEmail,
+      paymentUPI,
+      amountPaid,
+      requestedDuration,
+    } = req.body;
 
-  const {
-    title,
-    description,
-    businessName,
-    contactPhone,
-    contactEmail,
-    paymentUPI,
-    amountPaid,
-    requestedDuration,
-  } = req.body;
+    // 🛑 Backend safety: max 5 images
+    const imageFiles = req.files?.images || [];
+    if (imageFiles.length > 5) {
+      return res
+        .status(400)
+        .json({ message: 'Maximum 5 images allowed' });
+    }
 
-  const images = (req.files.images || []).map(f => f.path);
-  const paymentProof = req.files.paymentProof?.[0]?.path || null;
+    const images = imageFiles.map(f => f.path);
+    const paymentProof = req.files?.paymentProof?.[0]?.path || null;
 
-  // 🔹 Fetch user for email
-  const user = await User.findById(req.user.id).select('name email');
-    if (!user) return res.status(404).json({ message: 'Seller not found' });
-    const seller = await User.findById(req.user.id).select('name email');
-    if (!seller) return res.status(404).json({ message: 'Seller not found' });
+    // Fetch uploader
+    const owner = await User.findById(req.user.id).select('name email');
+    if (!owner)
+      return res.status(404).json({ message: 'User not found' });
 
-  const ad = await Advertisement.create({
-    title,
-    description,
-    businessName,
-    contactPhone,
-    contactEmail,
-    ownerId: req.user.id,
-    sellerId: seller._id,
-    sellerName: seller.name,
-    sellerEmail: seller.email,
-    paymentUPI,
-    amountPaid: Number(amountPaid) || 0,
-    requestedDuration: Number(requestedDuration) || 7,
-    images,
-    paymentProof,
-    status: 'pending',
-  });
+    const ad = await Advertisement.create({
+      title,
+      description,
+      businessName,
+      contactPhone,
+      contactEmail,
 
-  // =======================
-  // AD SUBMISSION EMAIL
-  // =======================
-  await sendMailSafe({
-    to: user.email,
-    subject: 'Advertisement submitted 📢',
-    html: `
-      <p>Hi ${user.name},</p>
-      <p>Your advertisement <b>${ad.title}</b> was uploaded successfully.</p>
-      <p>It is currently under <b>admin verification</b>.</p>
-      <p>You will receive another email once it is approved or rejected.</p>
-      <br/>
-      <p>Thanks for advertising on <b>RebuZZar</b>!</p>
-    `,
-  });
+      // Owner snapshot
+      ownerId: owner._id,
+      ownerName: owner.name,
+      ownerEmail: owner.email,
 
-  res.json({ success: true, ad });
+      // Payment
+      paymentUPI,
+      amountPaid: Number(amountPaid) || 0,
+      requestedDuration: Number(requestedDuration) || 7,
+      paymentProof,
+
+      // Images (ARRAY)
+      images,
+
+      status: 'pending',
+    });
+
+    // Email
+    await sendMailSafe({
+      to: owner.email,
+      subject: 'Advertisement submitted 📢',
+      html: `
+        <p>Hi ${owner.name},</p>
+        <p>Your advertisement <b>${ad.title}</b> was uploaded successfully.</p>
+        <p>It is currently under <b>admin verification</b>.</p>
+        <p>You will receive another email once it is approved or rejected.</p>
+        <br/>
+        <p>Thanks for advertising on <b>RebuZZar</b>!</p>
+      `,
+    });
+
+    res.status(201).json({ success: true, ad });
+  } catch (err) {
+    console.error('CREATE AD ERROR:', err);
+    res.status(500).json({ message: 'Failed to create advertisement' });
+  }
 };
 
 // =======================
 // GET USER ADS
 // =======================
 exports.getMyAds = async (req, res) => {
-  const ads = await Advertisement.find({ ownerId: req.user.id }).sort({
-    createdAt: -1,
-  });
+  const ads = await Advertisement.find({
+    ownerId: req.user.id,
+  }).sort({ createdAt: -1 });
+
   res.json({ success: true, ads });
 };
 
@@ -81,14 +95,16 @@ exports.getMyAds = async (req, res) => {
 // GET PUBLIC ADS
 // =======================
 exports.getPublicAds = async (req, res) => {
-  const ads = await Advertisement.find({ status: 'approved' }).sort({
-    approvedAt: -1,
-  });
+  const ads = await Advertisement.find({
+    status: 'approved',
+    expiresAt: { $gt: new Date() },
+  }).sort({ approvedAt: -1 });
+
   res.json({ success: true, ads });
 };
 
 // =======================
-// EXTEND AD
+// EXTEND ADVERTISEMENT
 // =======================
 exports.extendAd = async (req, res) => {
   const ad = await Advertisement.findById(req.params.id);
