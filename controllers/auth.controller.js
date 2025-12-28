@@ -98,8 +98,22 @@ exports.login = async (req, res) => {
 };
 
 exports.googleCallback = (req, res) => {
-  const token = jwt.sign({ id: req.user._id }, process.env.JWT_SECRET, { expiresIn: '7d' });
-  res.redirect(`http://localhost:5173/?token=${token}`);
+  if (!req.user) {
+    return res.redirect('http://localhost:5173/?error=unauthorized');
+  }
+
+  const token = jwt.sign(
+    { id: req.user._id },
+    process.env.JWT_SECRET,
+    { expiresIn: '7d' }
+  );
+
+  const frontendURL =
+    process.env.FRONTEND_URL || 'http://localhost:5173';
+
+  res.redirect(
+    `${frontendURL}/google-auth-success?token=${token}`
+  );
 };
 
 exports.forgotPassword = async (req, res) => {
