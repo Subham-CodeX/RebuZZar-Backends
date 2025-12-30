@@ -15,6 +15,12 @@ const UserSchema = new mongoose.Schema(
 
     password: { type: String, required: true },
 
+    // ✅ WELCOME POPUP FLAG (BACKEND CONTROLLED)
+    hasSeenWelcome: {
+      type: Boolean,
+      default: false, // 👈 first-time users only
+    },
+
     avatar: {
       type: String,
       default: 'https://via.placeholder.com/150',

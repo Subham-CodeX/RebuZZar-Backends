@@ -2,15 +2,20 @@ const Cart = require('../models/Cart');
 const Product = require('../models/Product');
 const User = require('../models/User');
 
-// =======================
-// GET CART
-// =======================
+/* =======================
+   GET CART
+======================= */
 exports.getCart = async (req, res) => {
-  let cart = await Cart.findOne({ buyerId: req.user.id });
+  const buyerId = req.user?.id;
+  if (!buyerId) {
+    return res.status(401).json({ message: 'Unauthorized' });
+  }
+
+  const cart = await Cart.findOne({ buyerId });
 
   if (!cart) {
     return res.json({
-      buyerId: req.user.id,
+      buyerId,
       items: [],
     });
   }
@@ -18,29 +23,34 @@ exports.getCart = async (req, res) => {
   res.json(cart);
 };
 
-// =======================
-// ADD TO CART
-// =======================
+/* =======================
+   ADD TO CART
+======================= */
 exports.addToCart = async (req, res) => {
   try {
-    if (!req.body || typeof req.body !== 'object') {
-      return res.status(400).json({ message: 'Invalid request body' });
+    const buyerId = req.user?.id;
+    if (!buyerId) {
+      return res.status(401).json({ message: 'Please login to add items to cart' });
     }
 
     const { productId } = req.body;
-    const quantity = Number(req.body.quantity) || 1;
+    const quantity = Math.max(Number(req.body.quantity) || 1, 1);
 
     if (!productId) {
       return res.status(400).json({ message: 'productId is required' });
     }
 
-    // Buyer
-    const buyer = await User.findById(req.user.id).select('name email');
+    /* -----------------------
+       FETCH BUYER
+    ------------------------ */
+    const buyer = await User.findById(buyerId).select('name email');
     if (!buyer) {
       return res.status(404).json({ message: 'Buyer not found' });
     }
 
-    // Product + Seller
+    /* -----------------------
+       FETCH PRODUCT
+    ------------------------ */
     const product = await Product.findOne({
       _id: productId,
       status: 'approved',
@@ -51,19 +61,26 @@ exports.addToCart = async (req, res) => {
       return res.status(404).json({ message: 'Product not available' });
     }
 
-    let cart = await Cart.findOne({ buyerId: buyer._id });
+    /* -----------------------
+       FIND OR CREATE CART
+       (ATOMIC SAFE)
+    ------------------------ */
+    let cart = await Cart.findOne({ buyerId });
 
     if (!cart) {
-      cart = new Cart({
-        buyerId: buyer._id,
+      cart = await Cart.create({
+        buyerId,
         buyerName: buyer.name,
         buyerEmail: buyer.email,
         items: [],
       });
     }
 
+    /* -----------------------
+       UPDATE ITEM
+    ------------------------ */
     const existingItem = cart.items.find(
-      item => item.productId.toString() === product._id.toString()
+      (item) => item.productId.toString() === product._id.toString()
     );
 
     if (existingItem) {
@@ -75,7 +92,6 @@ exports.addToCart = async (req, res) => {
         productImage: product.imageUrl?.[0] || '',
         price: product.price,
         quantity,
-
         sellerId: product.sellerId._id,
         sellerName: product.sellerId.name,
         sellerEmail: product.sellerId.email,
@@ -83,7 +99,6 @@ exports.addToCart = async (req, res) => {
     }
 
     await cart.save();
-
     res.json({ cart });
   } catch (err) {
     console.error('ADD TO CART ERROR:', err);
@@ -91,25 +106,29 @@ exports.addToCart = async (req, res) => {
   }
 };
 
-// =======================
-// UPDATE CART ITEM
-// =======================
+/* =======================
+   UPDATE CART ITEM
+======================= */
 exports.updateCartItem = async (req, res) => {
-  const cart = await Cart.findOne({ buyerId: req.user.id });
+  const buyerId = req.user?.id;
+  if (!buyerId) return res.status(401).json({ message: 'Unauthorized' });
+
+  const cart = await Cart.findOne({ buyerId });
   if (!cart) return res.status(404).json({ message: 'Cart not found' });
 
   const item = cart.items.find(
-    i => i.productId.toString() === req.params.productId
+    (i) => i.productId.toString() === req.params.productId
   );
 
-  if (!item)
+  if (!item) {
     return res.status(404).json({ message: 'Item not found in cart' });
+  }
 
   const qty = Number(req.body.quantity);
 
   if (qty <= 0) {
     cart.items = cart.items.filter(
-      i => i.productId.toString() !== req.params.productId
+      (i) => i.productId.toString() !== req.params.productId
     );
   } else {
     item.quantity = qty;
@@ -119,26 +138,32 @@ exports.updateCartItem = async (req, res) => {
   res.json({ cart });
 };
 
-// =======================
-// REMOVE CART ITEM
-// =======================
+/* =======================
+   REMOVE CART ITEM
+======================= */
 exports.removeCartItem = async (req, res) => {
-  const cart = await Cart.findOne({ buyerId: req.user.id });
+  const buyerId = req.user?.id;
+  if (!buyerId) return res.status(401).json({ message: 'Unauthorized' });
+
+  const cart = await Cart.findOne({ buyerId });
   if (!cart) return res.status(404).json({ message: 'Cart not found' });
 
   cart.items = cart.items.filter(
-    i => i.productId.toString() !== req.params.productId
+    (i) => i.productId.toString() !== req.params.productId
   );
 
   await cart.save();
   res.json({ cart });
 };
 
-// =======================
-// CLEAR CART
-// =======================
+/* =======================
+   CLEAR CART
+======================= */
 exports.clearCart = async (req, res) => {
-  const cart = await Cart.findOne({ buyerId: req.user.id });
+  const buyerId = req.user?.id;
+  if (!buyerId) return res.status(401).json({ message: 'Unauthorized' });
+
+  const cart = await Cart.findOne({ buyerId });
   if (!cart) return res.status(404).json({ message: 'Cart not found' });
 
   cart.items = [];

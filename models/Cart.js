@@ -1,9 +1,10 @@
-// models/Cart.js
 const mongoose = require('mongoose');
 
+/* =======================
+   CART ITEM SCHEMA
+======================= */
 const CartItemSchema = new mongoose.Schema(
   {
-    // Product snapshot
     productId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Product',
@@ -23,7 +24,6 @@ const CartItemSchema = new mongoose.Schema(
     },
     quantity: {
       type: Number,
-      required: true,
       min: 1,
       default: 1,
     },
@@ -46,33 +46,35 @@ const CartItemSchema = new mongoose.Schema(
   { _id: false }
 );
 
+/* =======================
+   CART SCHEMA
+======================= */
 const CartSchema = new mongoose.Schema(
   {
-    // Buyer snapshot
     buyerId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',
       required: true,
-      unique: true,
+      unique: true, // ✅ exactly ONE cart per user
+      index: true,
     },
+
     buyerName: {
       type: String,
       required: true,
     },
+
     buyerEmail: {
       type: String,
       required: true,
     },
 
-    items: [CartItemSchema],
+    items: {
+      type: [CartItemSchema],
+      default: [],
+    },
   },
   { timestamps: true }
 );
-
-// Auto-update timestamp
-CartSchema.pre('save', function (next) {
-  this.updatedAt = Date.now();
-  next();
-});
 
 module.exports = mongoose.model('Cart', CartSchema);

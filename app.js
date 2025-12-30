@@ -66,6 +66,8 @@ app.use('/api/bookings', require('./routes/booking.routes'));
 app.use('/api/ads', require('./routes/ad.routes'));
 app.use('/api/admin', require('./routes/admin.routes'));
 app.use('/api/profile', require('./routes/profile.routes'));
+app.use('/api/user', require('./routes/user.routes'));
+
 
 // ----------------------------
 // ERROR HANDLER (ALWAYS LAST)

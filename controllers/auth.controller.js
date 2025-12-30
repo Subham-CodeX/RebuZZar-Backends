@@ -5,23 +5,29 @@ const crypto = require('crypto');
 const nodemailer = require('nodemailer');
 const validator = require('validator');
 
+// =======================
+// SIGNUP
+// =======================
 exports.signup = async (req, res) => {
   const { name, email, password, programType, department, year, studentCode } = req.body;
 
-  const universityDomain = process.env.UNIVERSITY_DOMAIN || '@brainwareuniversity.ac.in';
+  const universityDomain =
+    process.env.UNIVERSITY_DOMAIN || '@brainwareuniversity.ac.in';
 
-  if (!email || !validator.isEmail(email) || !email.endsWith(universityDomain))
+  if (!email || !validator.isEmail(email) || !email.endsWith(universityDomain)) {
     return res.status(400).json({ message: 'Invalid email' });
+  }
 
-  if (!name || !password || !programType || !department || !year)
+  if (!name || !password || !programType || !department || !year) {
     return res.status(400).json({ message: 'All required fields are required.' });
+  }
 
   const existingUser = await User.findOne({ email });
-  if (existingUser)
+  if (existingUser) {
     return res.status(409).json({ message: 'Account with this email already exists.' });
+  }
 
-  const salt = await bcrypt.genSalt(10);
-  const hashedPassword = await bcrypt.hash(password, salt);
+  const hashedPassword = await bcrypt.hash(password, 10);
 
   const otp = Math.floor(100000 + Math.random() * 900000).toString();
   const hashedOTP = crypto.createHash('sha256').update(otp).digest('hex');
@@ -37,6 +43,7 @@ exports.signup = async (req, res) => {
     isVerified: false,
     emailOTP: hashedOTP,
     emailOTPExpires: Date.now() + 10 * 60 * 1000,
+    hasSeenWelcome: false, // ✅ explicitly set
   });
 
   await user.save();
@@ -55,32 +62,51 @@ exports.signup = async (req, res) => {
     html: `<h1>${otp}</h1><p>OTP expires in 10 minutes</p>`,
   });
 
-  res.status(201).json({ message: 'OTP sent', userId: user._id });
+  res.status(201).json({
+    message: 'OTP sent',
+    userId: user._id,
+  });
 };
 
+// =======================
+// VERIFY OTP
+// =======================
 exports.verifyOTP = async (req, res) => {
   const { userId, otp } = req.body;
 
   const user = await User.findById(userId);
   if (!user) return res.status(404).json({ message: 'User not found' });
 
-  if (user.emailOTPExpires < Date.now())
+  if (user.emailOTPExpires < Date.now()) {
     return res.status(400).json({ message: 'OTP expired' });
+  }
 
   const hashedOTP = crypto.createHash('sha256').update(otp).digest('hex');
-  if (hashedOTP !== user.emailOTP)
+  if (hashedOTP !== user.emailOTP) {
     return res.status(400).json({ message: 'Invalid OTP' });
+  }
 
   user.isVerified = true;
   user.emailOTP = undefined;
   user.emailOTPExpires = undefined;
   await user.save();
 
-  const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, { expiresIn: '7d' });
+  const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, {
+    expiresIn: '7d',
+  });
 
-  res.json({ message: 'Verified', token });
+  const { password, ...userData } = user.toObject();
+
+  res.json({
+    message: 'Verified',
+    token,
+    user: userData, // ✅ includes hasSeenWelcome
+  });
 };
 
+// =======================
+// LOGIN
+// =======================
 exports.login = async (req, res) => {
   const { email, password } = req.body;
 
@@ -90,36 +116,44 @@ exports.login = async (req, res) => {
   const isMatch = await bcrypt.compare(password, user.password);
   if (!isMatch) return res.status(401).json({ message: 'Invalid credentials' });
 
-  const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, { expiresIn: '7d' });
+  const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, {
+    expiresIn: '7d',
+  });
 
   const { password: _, ...userData } = user.toObject();
 
-  res.json({ message: 'Login successful', user: userData, token });
+  res.json({
+    message: 'Login successful',
+    token,
+    user: userData, // ✅ frontend can check hasSeenWelcome
+  });
 };
 
+// =======================
+// GOOGLE LOGIN CALLBACK
+// =======================
 exports.googleCallback = (req, res) => {
   if (!req.user) {
-    return res.redirect('http://localhost:5173/?error=unauthorized');
+    return res.redirect(`${process.env.FRONTEND_URL}?error=unauthorized`);
   }
 
-  const token = jwt.sign(
-    { id: req.user._id },
-    process.env.JWT_SECRET,
-    { expiresIn: '7d' }
-  );
+  const token = jwt.sign({ id: req.user._id }, process.env.JWT_SECRET, {
+    expiresIn: '7d',
+  });
 
-  const frontendURL =
-    process.env.FRONTEND_URL || 'http://localhost:5173';
+  const frontendURL = process.env.FRONTEND_URL || 'http://localhost:5173';
 
-  res.redirect(
-    `${frontendURL}/google-auth-success?token=${token}`
-  );
+  res.redirect(`${frontendURL}/google-auth-success?token=${token}`);
 };
 
+// =======================
+// FORGOT PASSWORD
+// =======================
 exports.forgotPassword = async (req, res) => {
   const { email } = req.body;
-  if (!email || !validator.isEmail(email))
+  if (!email || !validator.isEmail(email)) {
     return res.json({ message: 'If account exists, link sent.' });
+  }
 
   const user = await User.findOne({ email });
   if (!user) return res.json({ message: 'If account exists, link sent.' });
@@ -150,6 +184,9 @@ exports.forgotPassword = async (req, res) => {
   res.json({ message: 'If account exists, link sent.' });
 };
 
+// =======================
+// RESET PASSWORD
+// =======================
 exports.resetPassword = async (req, res) => {
   const hashed = crypto.createHash('sha256').update(req.params.token).digest('hex');
 
