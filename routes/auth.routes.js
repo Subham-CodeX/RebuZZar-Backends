@@ -16,6 +16,9 @@ router.post('/verify-otp', authController.verifyOTP);
 // =======================
 router.post('/login', rateLimiter, authController.login);
 
+// email logout for admin
+router.post('/logout', authController.logout);
+
 // =======================
 // Google OAuth
 // =======================

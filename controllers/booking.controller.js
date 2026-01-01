@@ -19,7 +19,7 @@ exports.createBooking = async (req, res) => {
 
     // Buyer
     const buyer = await User.findById(req.user.id)
-      .select('name email')
+      .select('name email studentCode programType department year')
       .session(session);
 
     if (!buyer) throw new Error('Buyer not found');
@@ -100,6 +100,64 @@ exports.createBooking = async (req, res) => {
       `,
     });
 
+
+     /* =======================
+       🔔 SELLER EMAIL (NO BUYER INFO)
+    ======================= */
+    for (const p of booking.products) {
+      await sendMailSafe({
+        to: p.sellerEmail,
+        subject: 'Your product has been booked 📦',
+        html: `
+          <p>Hello,</p>
+          <p>Your product has been booked on <b>RebuZZar</b>.</p>
+          <ul>
+            <li><b>Product:</b> ${p.title}</li>
+            <li><b>Quantity:</b> ${p.quantity}</li>
+          </ul>
+          <p>Please keep the product ready for dispatch.</p>
+          <br/>
+          <p>– RebuZZar Team</p>
+        `,
+      });
+    }
+
+        /* =======================
+       🔔 ADMIN ALERT EMAIL
+    ======================= */
+    await sendMailSafe({
+      to: process.env.ADMIN_EMAIL,
+      subject: 'New Booking Placed (Admin Alert)',
+      html: `
+        <h2>New Booking</h2>
+
+        <p><b>Buyer Details</b></p>
+        <ul>
+          <li>Name: ${buyer.name}</li>
+          <li>Email: ${buyer.email}</li>
+          <li>Student Code: ${buyer.studentCode || 'N/A'}</li>
+          <li>Program: ${buyer.programType}</li>
+          <li>Department: ${buyer.department}</li>
+          <li>Year: ${buyer.year}</li>
+        </ul>
+
+        <hr/>
+
+        <p><b>Booked Products</b></p>
+        <ul>
+          ${booking.products
+            .map(
+              p =>
+                `<li>${p.title} × ${p.quantity} (₹${p.price})</li>`
+            )
+            .join('')}
+        </ul>
+
+        <p><b>Total Amount:</b> ₹${booking.totalPrice}</p>
+        <p><b>Booking ID:</b> ${booking._id}</p>
+      `,
+    });
+
     res.status(201).json({
       message: 'Booking successful!',
       bookingId: booking._id,
@@ -145,7 +203,7 @@ exports.getBookingById = async (req, res) => {
 // =======================
 exports.cancelBooking = async (req, res) => {
   const booking = await Booking.findById(req.params.id)
-    .populate('buyerId', 'name email')
+    .populate('buyerId', 'name email studentCode programType department year')
     .populate({
       path: 'products.productId',
       populate: { path: 'sellerId', select: 'name email' },
@@ -190,6 +248,47 @@ exports.cancelBooking = async (req, res) => {
       </p>
       <br/>
       <p>– RebuZZar Team</p>
+    `,
+  });
+
+  /* =======================
+     🔔 SELLER CANCEL EMAIL (NO BUYER INFO)
+  ======================= */
+  for (const p of booking.products) {
+    await sendMailSafe({
+      to: p.sellerEmail,
+      subject: 'Booked product cancelled ❌',
+      html: `
+        <p>Hello,</p>
+        <p>A booking for your product has been cancelled on <b>RebuZZar</b>.</p>
+        <ul>
+          <li><b>Product:</b> ${p.title}</li>
+          <li><b>Quantity:</b> ${p.quantity}</li>
+        </ul>
+        <p>The product quantity has been restored automatically.</p>
+        <br/>
+        <p>– RebuZZar Team</p>
+      `,
+    });
+  }
+
+  // =======================
+  // 🔔 ADMIN ALERT – BOOKING CANCELLED
+  // =======================
+  await sendMailSafe({
+    to: process.env.ADMIN_EMAIL,
+    subject: 'Booking Cancelled (Admin Alert)',
+    html: `
+      <h2>❌ Booking Cancelled</h2>
+      <p><b>Buyer Name:</b> ${booking.buyerId.name}</p>
+      <p><b>Buyer Email:</b> ${booking.buyerId.email}</p>
+      <p><b>Student Code:</b> ${booking.buyerId.studentCode || 'N/A'}</p>
+      <p><b>Booking ID:</b> ${booking._id}</p>
+      <p><b>Cancelled At:</b> ${new Date().toLocaleString()}</p>
+      <hr/>
+      <p><b>Cancelled Products:</b></p>
+      <ul>${productList}</ul>
+      <p><b>Total Amount:</b> ₹${booking.totalPrice}</p>
     `,
   });
 

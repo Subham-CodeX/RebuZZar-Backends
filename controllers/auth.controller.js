@@ -6,6 +6,63 @@ const nodemailer = require('nodemailer');
 const validator = require('validator');
 
 // =======================
+// MAIL TRANSPORTER (SINGLE INSTANCE)
+// =======================
+const transporter = nodemailer.createTransport({
+  host: process.env.EMAIL_HOST,
+  port: Number(process.env.EMAIL_PORT) || 587,
+  secure: process.env.EMAIL_SECURE === 'true',
+  auth: {
+    user: process.env.EMAIL_USER,
+    pass: process.env.EMAIL_PASS,
+  },
+});
+
+// =======================
+// ADMIN MAIL HELPERS
+// =======================
+const sendAdminLoginAlert = async (user, loginMethod = 'Email/Password') => {
+  if (process.env.ADMIN_ALERTS !== 'true') return;
+
+  await transporter.sendMail({
+    from: `"RebuZZar Admin Alerts" <${process.env.EMAIL_FROM}>`,
+    to: process.env.ADMIN_EMAIL,
+    subject: 'User Signed In - RebuZZar',
+    html: `
+      <h2>New User Login</h2>
+      <p><b>Name:</b> ${user.name}</p>
+      <p><b>Email:</b> ${user.email}</p>
+      <p><b>Student Code:</b> ${user.studentCode || 'N/A'}</p>
+      <p><b>Program:</b> ${user.programType}</p>
+      <p><b>Department:</b> ${user.department}</p>
+      <p><b>Year:</b> ${user.year}</p>
+      <p><b>Login Method:</b> ${loginMethod}</p>
+      <p><b>Login Time:</b> ${new Date().toLocaleString()}</p>
+    `,
+  });
+};
+
+const sendAdminLogoutAlert = async (user) => {
+  if (process.env.ADMIN_ALERTS !== 'true') return;
+
+  await transporter.sendMail({
+    from: `"RebuZZar Admin Alerts" <${process.env.EMAIL_FROM}>`,
+    to: process.env.ADMIN_EMAIL,
+    subject: 'User Logged Out - RebuZZar',
+    html: `
+      <h2>User Logout</h2>
+      <p><b>Name:</b> ${user.name}</p>
+      <p><b>Email:</b> ${user.email}</p>
+      <p><b>Student Code:</b> ${user.studentCode || 'N/A'}</p>
+      <p><b>Program:</b> ${user.programType}</p>
+      <p><b>Department:</b> ${user.department}</p>
+      <p><b>Year:</b> ${user.year}</p>
+      <p><b>Logout Time:</b> ${new Date().toLocaleString()}</p>
+    `,
+  });
+};
+
+// =======================
 // SIGNUP
 // =======================
 exports.signup = async (req, res) => {
@@ -43,17 +100,10 @@ exports.signup = async (req, res) => {
     isVerified: false,
     emailOTP: hashedOTP,
     emailOTPExpires: Date.now() + 10 * 60 * 1000,
-    hasSeenWelcome: false, // ✅ explicitly set
+    hasSeenWelcome: false,
   });
 
   await user.save();
-
-  const transporter = nodemailer.createTransport({
-    host: process.env.EMAIL_HOST,
-    port: Number(process.env.EMAIL_PORT) || 587,
-    secure: process.env.EMAIL_SECURE === 'true',
-    auth: { user: process.env.EMAIL_USER, pass: process.env.EMAIL_PASS },
-  });
 
   await transporter.sendMail({
     from: process.env.EMAIL_FROM,
@@ -100,12 +150,12 @@ exports.verifyOTP = async (req, res) => {
   res.json({
     message: 'Verified',
     token,
-    user: userData, // ✅ includes hasSeenWelcome
+    user: userData,
   });
 };
 
 // =======================
-// LOGIN
+// LOGIN (ADMIN ALERT)
 // =======================
 exports.login = async (req, res) => {
   const { email, password } = req.body;
@@ -120,19 +170,54 @@ exports.login = async (req, res) => {
     expiresIn: '7d',
   });
 
+  await sendAdminLoginAlert(user, 'Email/Password');
+
   const { password: _, ...userData } = user.toObject();
 
   res.json({
     message: 'Login successful',
     token,
-    user: userData, // ✅ frontend can check hasSeenWelcome
+    user: userData,
   });
 };
 
 // =======================
-// GOOGLE LOGIN CALLBACK
+// LOGOUT (ADMIN ALERT ADDED)
 // =======================
-exports.googleCallback = (req, res) => {
+exports.logout = async (req, res) => {
+  try {
+    // 1️⃣ Extract token manually
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return res.json({ message: 'Logout successful' }); // frontend-safe
+    }
+
+    const token = authHeader.split(' ')[1];
+
+    // 2️⃣ Decode token manually
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+
+    // 3️⃣ Get user from DB
+    const user = await User.findById(decoded.id);
+    if (!user) {
+      return res.json({ message: 'Logout successful' });
+    }
+
+    // 4️⃣ Send admin logout email
+    await sendAdminLogoutAlert(user);
+
+    // 5️⃣ Respond success
+    res.json({ message: 'Logout successful' });
+  } catch (err) {
+    console.error('Logout error:', err.message);
+    res.json({ message: 'Logout successful' }); // never block logout
+  }
+};
+
+// =======================
+// GOOGLE LOGIN CALLBACK (ADMIN ALERT)
+// =======================
+exports.googleCallback = async (req, res) => {
   if (!req.user) {
     return res.redirect(`${process.env.FRONTEND_URL}?error=unauthorized`);
   }
@@ -140,6 +225,8 @@ exports.googleCallback = (req, res) => {
   const token = jwt.sign({ id: req.user._id }, process.env.JWT_SECRET, {
     expiresIn: '7d',
   });
+
+  await sendAdminLoginAlert(req.user, 'Google OAuth');
 
   const frontendURL = process.env.FRONTEND_URL || 'http://localhost:5173';
 
@@ -166,13 +253,6 @@ exports.forgotPassword = async (req, res) => {
   await user.save();
 
   const link = `${process.env.FRONTEND_URL}/reset-password/${rawToken}`;
-
-  const transporter = nodemailer.createTransport({
-    host: process.env.EMAIL_HOST,
-    port: Number(process.env.EMAIL_PORT),
-    secure: true,
-    auth: { user: process.env.EMAIL_USER, pass: process.env.EMAIL_PASS },
-  });
 
   await transporter.sendMail({
     to: user.email,
