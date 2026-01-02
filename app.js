@@ -31,10 +31,14 @@ app.use(helmet());
 
 app.use(
   cors({
-    origin: 'http://localhost:5173',
+    origin: [
+      "http://localhost:5173",
+      "https://rebuzzar-frontend.onrender.com" // frontend URL (later)
+    ],
     credentials: true,
   })
 );
+
 
 app.use(express.json({ limit: '10kb' }));
 app.use(passport.initialize());
