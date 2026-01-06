@@ -141,7 +141,7 @@ exports.googleCallback = (req, res) => {
     expiresIn: '7d',
   });
 
-  const frontendURL = process.env.FRONTEND_URL || 'http://localhost:5173';
+  const frontendURL = process.env.FRONTEND_URL || 'https://rebuzzar-frontend.onrender.com';
 
   res.redirect(`${frontendURL}/google-auth-success?token=${token}`);
 };
