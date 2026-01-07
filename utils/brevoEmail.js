@@ -1,6 +1,6 @@
 const axios = require('axios');
 
-exports.sendMailSafe = async ({ to, subject, html }) => {
+const sendBrevoEmail = async ({ to, subject, html }) => {
   try {
     await axios.post(
       'https://api.brevo.com/v3/smtp/email',
@@ -28,3 +28,5 @@ exports.sendMailSafe = async ({ to, subject, html }) => {
     );
   }
 };
+
+module.exports = sendBrevoEmail;

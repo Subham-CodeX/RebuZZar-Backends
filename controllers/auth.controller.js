@@ -2,33 +2,8 @@ const User = require('../models/User');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
-const nodemailer = require('nodemailer');
 const validator = require('validator');
-
-// =======================
-// BREVO MAIL TRANSPORTER
-// =======================
-const transporter = nodemailer.createTransport({
-  host: process.env.EMAIL_HOST, // smtp-relay.brevo.com
-  port: Number(process.env.EMAIL_PORT) || 587,
-  secure: false, // MUST be false for Brevo
-  auth: {
-    user: process.env.EMAIL_USER, // apikey
-    pass: process.env.EMAIL_PASS, // Brevo API key
-  },
-  connectionTimeout: 10000,
-  greetingTimeout: 10000,
-  socketTimeout: 10000,
-});
-
-// Verify SMTP once (Render-safe)
-transporter.verify((err) => {
-  if (err) {
-    console.error('❌ Brevo SMTP ERROR:', err.message);
-  } else {
-    console.log('✅ Brevo SMTP Ready');
-  }
-});
+const sendBrevoEmail = require('../utils/brevoEmail');
 
 // =======================
 // SIGNUP
@@ -58,7 +33,7 @@ exports.signup = async (req, res) => {
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
     const hashedOTP = crypto.createHash('sha256').update(otp).digest('hex');
 
-    const user = new User({
+    const user = await User.create({
       name,
       email,
       password: hashedPassword,
@@ -72,30 +47,21 @@ exports.signup = async (req, res) => {
       hasSeenWelcome: false,
     });
 
-    // 🔥 SEND RESPONSE FIRST (NO BLOCKING)
-    res.status(201).json({
-      message: 'OTP sent to email',
+    // 🔥 SEND OTP EMAIL (HTTP – NON BLOCKING)
+    sendBrevoEmail({
+      to: email,
+      subject: 'Verify your RebuZZar Account',
+      html: `
+        <h2>Email Verification</h2>
+        <p>Your OTP is:</p>
+        <h1>${otp}</h1>
+        <p>OTP expires in 10 minutes.</p>
+      `,
     });
 
-    // 🔥 SAVE USER & SEND EMAIL ASYNC
-    setImmediate(async () => {
-      try {
-        await user.save();
-
-        await transporter.sendMail({
-          from: process.env.EMAIL_FROM,
-          to: email,
-          subject: 'Verify your RebuZZar Account',
-          html: `
-            <h2>Email Verification</h2>
-            <p>Your OTP is:</p>
-            <h1>${otp}</h1>
-            <p>OTP expires in 10 minutes.</p>
-          `,
-        });
-      } catch (err) {
-        console.error('SIGNUP EMAIL ERROR:', err.message);
-      }
+    res.status(201).json({
+      message: 'OTP sent to email',
+      userId: user._id,
     });
 
   } catch (err) {
@@ -226,18 +192,10 @@ exports.forgotPassword = async (req, res) => {
 
     const link = `${process.env.FRONTEND_URL}/reset-password/${rawToken}`;
 
-    // 🔥 NON-BLOCKING EMAIL
-    setImmediate(async () => {
-      try {
-        await transporter.sendMail({
-          from: process.env.EMAIL_FROM,
-          to: email,
-          subject: 'Reset Password',
-          html: `<p>Click below to reset your password:</p><a href="${link}">Reset Password</a>`,
-        });
-      } catch (err) {
-        console.error('FORGOT PASSWORD EMAIL ERROR:', err.message);
-      }
+    sendBrevoEmail({
+      to: email,
+      subject: 'Reset Password',
+      html: `<p>Click below to reset your password:</p><a href="${link}">Reset Password</a>`,
     });
 
     res.json({ message: 'If account exists, link sent.' });
