@@ -6,16 +6,28 @@ const nodemailer = require('nodemailer');
 const validator = require('validator');
 
 // =======================
-// MAIL TRANSPORTER (GLOBAL)
+// BREVO MAIL TRANSPORTER
 // =======================
 const transporter = nodemailer.createTransport({
-  host: process.env.EMAIL_HOST,
-  port: Number(process.env.EMAIL_PORT) || 465,
-  secure: process.env.EMAIL_SECURE === 'true' || Number(process.env.EMAIL_PORT) === 465,
+  host: process.env.EMAIL_HOST, // smtp-relay.brevo.com
+  port: Number(process.env.EMAIL_PORT) || 587,
+  secure: false, // MUST be false for Brevo
   auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS,
+    user: process.env.EMAIL_USER, // apikey
+    pass: process.env.EMAIL_PASS, // Brevo API key
   },
+  connectionTimeout: 10000,
+  greetingTimeout: 10000,
+  socketTimeout: 10000,
+});
+
+// Verify SMTP once (Render-safe)
+transporter.verify((err) => {
+  if (err) {
+    console.error('❌ Brevo SMTP ERROR:', err.message);
+  } else {
+    console.log('✅ Brevo SMTP Ready');
+  }
 });
 
 // =======================
@@ -46,7 +58,6 @@ exports.signup = async (req, res) => {
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
     const hashedOTP = crypto.createHash('sha256').update(otp).digest('hex');
 
-    // 🔴 DO NOT SAVE USER YET
     const user = new User({
       name,
       email,
@@ -61,25 +72,30 @@ exports.signup = async (req, res) => {
       hasSeenWelcome: false,
     });
 
-    // ✅ SEND EMAIL FIRST
-    await transporter.sendMail({
-      from: process.env.EMAIL_FROM,
-      to: email,
-      subject: 'Verify your RebuZZar Account',
-      html: `
-        <h2>Email Verification</h2>
-        <p>Your OTP is:</p>
-        <h1>${otp}</h1>
-        <p>OTP expires in 10 minutes.</p>
-      `,
-    });
-
-    // ✅ SAVE ONLY AFTER EMAIL SUCCESS
-    await user.save();
-
+    // 🔥 SEND RESPONSE FIRST (NO BLOCKING)
     res.status(201).json({
       message: 'OTP sent to email',
-      userId: user._id,
+    });
+
+    // 🔥 SAVE USER & SEND EMAIL ASYNC
+    setImmediate(async () => {
+      try {
+        await user.save();
+
+        await transporter.sendMail({
+          from: process.env.EMAIL_FROM,
+          to: email,
+          subject: 'Verify your RebuZZar Account',
+          html: `
+            <h2>Email Verification</h2>
+            <p>Your OTP is:</p>
+            <h1>${otp}</h1>
+            <p>OTP expires in 10 minutes.</p>
+          `,
+        });
+      } catch (err) {
+        console.error('SIGNUP EMAIL ERROR:', err.message);
+      }
     });
 
   } catch (err) {
@@ -140,9 +156,7 @@ exports.login = async (req, res) => {
     const { email, password } = req.body;
 
     const user = await User.findOne({ email });
-    if (!user) {
-      return res.status(401).json({ message: 'Invalid credentials' });
-    }
+    if (!user) return res.status(401).json({ message: 'Invalid credentials' });
 
     if (!user.isVerified) {
       return res.status(403).json({
@@ -151,9 +165,7 @@ exports.login = async (req, res) => {
     }
 
     const isMatch = await bcrypt.compare(password, user.password);
-    if (!isMatch) {
-      return res.status(401).json({ message: 'Invalid credentials' });
-    }
+    if (!isMatch) return res.status(401).json({ message: 'Invalid credentials' });
 
     const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, {
       expiresIn: '7d',
@@ -185,7 +197,8 @@ exports.googleCallback = (req, res) => {
     expiresIn: '7d',
   });
 
-  const frontendURL = process.env.FRONTEND_URL || 'https://rebuzzar-frontend.onrender.com';
+  const frontendURL =
+    process.env.FRONTEND_URL || 'https://rebuzzar-frontend.onrender.com';
 
   res.redirect(`${frontendURL}/google-auth-success?token=${token}`);
 };
@@ -213,11 +226,18 @@ exports.forgotPassword = async (req, res) => {
 
     const link = `${process.env.FRONTEND_URL}/reset-password/${rawToken}`;
 
-    await transporter.sendMail({
-      from: process.env.EMAIL_FROM,
-      to: email,
-      subject: 'Reset Password',
-      html: `<p>Click below to reset your password:</p><a href="${link}">Reset Password</a>`,
+    // 🔥 NON-BLOCKING EMAIL
+    setImmediate(async () => {
+      try {
+        await transporter.sendMail({
+          from: process.env.EMAIL_FROM,
+          to: email,
+          subject: 'Reset Password',
+          html: `<p>Click below to reset your password:</p><a href="${link}">Reset Password</a>`,
+        });
+      } catch (err) {
+        console.error('FORGOT PASSWORD EMAIL ERROR:', err.message);
+      }
     });
 
     res.json({ message: 'If account exists, link sent.' });
