@@ -37,4 +37,8 @@ router.post(
 // Get approved ads for public
 router.get('/public', adController.getPublicAds);
 
+// Get single approved advertisement (PUBLIC)
+router.get('/:id', adController.getPublicAdById);
+
+
 module.exports = router;

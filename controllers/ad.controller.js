@@ -125,6 +125,27 @@ exports.getPublicAds = async (req, res) => {
 };
 
 /* =======================
+   GET SINGLE PUBLIC AD
+======================= */
+
+exports.getPublicAdById = async (req, res) => {
+  try {
+    const ad = await Advertisement.findById(req.params.id);
+
+    if (!ad || ad.status !== 'approved') {
+      return res.status(404).json({ message: 'Advertisement not found' });
+    }
+
+    res.json({ success: true, ad });
+  } catch (err) {
+    console.error('GET AD BY ID ERROR:', err);
+    res.status(500).json({ message: 'Failed to fetch advertisement' });
+  }
+};
+
+
+
+/* =======================
    EXTEND ADVERTISEMENT
 ======================= */
 
