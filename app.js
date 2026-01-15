@@ -20,6 +20,7 @@ const errorHandler = require('./middlewares/error.middleware');
 const app = express();
 
 app.set('trust proxy', 1);
+
 // ----------------------------
 // CONNECT DATABASE
 // ----------------------------
@@ -40,7 +41,6 @@ app.use(
   })
 );
 
-
 app.use(express.json({ limit: '10kb' }));
 app.use(passport.initialize());
 
@@ -49,6 +49,22 @@ app.use((req, res, next) => {
   req.query = { ...req.query };
   mongoSanitize.sanitize(req.query);
   next();
+});
+
+// ----------------------------
+// ✅ KEEP ALIVE PING ROUTES (Render Sleep Fix)
+// ----------------------------
+app.get('/ping', (req, res) => {
+  res.status(200).send('pong ✅ RebuZZar backend is awake');
+});
+
+// Optional health route (helpful for monitoring / debugging)
+app.get('/health', (req, res) => {
+  res.status(200).json({
+    status: "ok",
+    message: "✅ RebuZZar backend healthy",
+    timestamp: new Date().toISOString(),
+  });
 });
 
 // ----------------------------
@@ -73,8 +89,6 @@ app.use('/api/admin', require('./routes/admin.routes'));
 app.use('/api/profile', require('./routes/profile.routes'));
 app.use('/api/user', require('./routes/user.routes'));
 app.use('/api/admin/email', require('./routes/adminBroadcastEmail.routes'));
-
-
 
 // ----------------------------
 // ERROR HANDLER (ALWAYS LAST)
