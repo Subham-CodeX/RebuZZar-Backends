@@ -1,5 +1,5 @@
 // models/User.js
-const mongoose = require('mongoose');
+const mongoose = require("mongoose");
 
 const UserSchema = new mongoose.Schema(
   {
@@ -23,39 +23,65 @@ const UserSchema = new mongoose.Schema(
 
     avatar: {
       type: String,
-      default: 'https://via.placeholder.com/150',
+      default: "https://via.placeholder.com/150",
     },
 
     joinDate: { type: Date, default: Date.now },
 
+    /**
+     * ✅ IMPORTANT UPGRADE FOR GOOGLE USERS
+     * Email Signup users will still provide these during signup (so required ✅)
+     * Google Signup users will fill these AFTER OTP verification (so required ❌)
+     */
     programType: {
       type: String,
-      required: true,
-      enum: ['Diploma', 'UG', 'PG', 'PhD'],
+      required: false, // ✅ changed (Google will fill later)
+      enum: ["Diploma", "UG", "PG", "PhD"],
     },
 
-    department: { type: String, required: true },
+    department: {
+      type: String,
+      required: false, // ✅ changed (Google will fill later)
+    },
 
-    year: { type: String, required: true },
+    year: {
+      type: String,
+      required: false, // ✅ changed (Google will fill later)
+    },
 
-    studentCode: { type: String },
+    studentCode: {
+      type: String,
+      default: "",
+    },
 
-    // Email verification
+    // ✅ Google Login Flags
+    isGoogleUser: {
+      type: Boolean,
+      default: false,
+    },
+
+    // ✅ This means programType/department/year/studentCode completed
+    isProfileComplete: {
+      type: Boolean,
+      default: false,
+    },
+
+    // ✅ Email verification (OTP) (SAME AS YOUR SYSTEM ✅)
     isVerified: { type: Boolean, default: false },
     emailOTP: { type: String },
     emailOTPExpires: { type: Date },
 
-    // Password reset
+    // ✅ Password reset (unchanged)
     resetPasswordToken: { type: String },
     resetPasswordExpires: { type: Date },
 
     role: {
       type: String,
-      enum: ['student', 'admin'],
-      default: 'student',
+      enum: ["student", "admin"],
+      default: "student",
     },
   },
   { timestamps: true }
 );
 
-module.exports = mongoose.model('User', UserSchema);
+module.exports = mongoose.model("User", UserSchema);
