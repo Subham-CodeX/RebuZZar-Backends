@@ -9,7 +9,6 @@ const User = require("../models/User");
 // =======================
 // Signup + OTP (UNCHANGED ✅)
 // =======================
-// 🔒 Rate limit signup to prevent email abuse
 router.post("/signup", rateLimiter, authController.signup);
 router.post("/verify-otp", authController.verifyOTP);
 
@@ -36,9 +35,8 @@ router.get(
 );
 
 // =======================
-// ✅ Google Onboarding (NEW ✅)
+// ✅ Google Onboarding
 // =======================
-// Google user must verify OTP + complete profile after login
 router.post("/google/send-otp", authMiddleware, authController.sendGoogleOTP);
 router.post("/google/verify-otp", authMiddleware, authController.verifyGoogleOTP);
 router.post(
@@ -47,10 +45,12 @@ router.post(
   authController.completeGoogleProfile
 );
 
+// ✅ NEW: Set Password for Google User
+router.post("/set-password", authMiddleware, authController.setPassword);
+
 // =======================
-// Get Current User (UPGRADED ✅)
+// Get Current User (UNCHANGED ✅)
 // =======================
-// 🔒 Block unverified users
 router.get("/me", authMiddleware, async (req, res) => {
   try {
     const user = await User.findById(req.user.id).select("-password");
@@ -59,14 +59,12 @@ router.get("/me", authMiddleware, async (req, res) => {
       return res.status(404).json({ message: "User not found" });
     }
 
-    // ✅ OTP verification required for everyone (Email + Google)
     if (!user.isVerified) {
       return res.status(403).json({
         message: "Email not verified",
       });
     }
 
-    // ✅ Google users also must complete profile
     if (user.isGoogleUser && !user.isProfileComplete) {
       return res.status(403).json({
         message: "Google profile not complete",

@@ -51,18 +51,15 @@ exports.signup = async (req, res) => {
       year,
       studentCode,
 
-      // ✅ Email signup always requires OTP
       isVerified: false,
       emailOTP: hashedOTP,
       emailOTPExpires: Date.now() + 10 * 60 * 1000,
       hasSeenWelcome: false,
 
-      // ✅ Not Google user
       isGoogleUser: false,
-      isProfileComplete: true, // ✅ email signup already completes profile
+      isProfileComplete: true,
     });
 
-    // 🔥 SEND OTP EMAIL (HTTP – NON BLOCKING)
     sendBrevoEmail({
       to: email,
       subject: "Verify your RebuZZar Account",
@@ -109,7 +106,6 @@ exports.verifyOTP = async (req, res) => {
     user.emailOTP = undefined;
     user.emailOTPExpires = undefined;
 
-    // ✅ Email signup profile already completed
     if (!user.isGoogleUser) {
       user.isProfileComplete = true;
     }
@@ -134,7 +130,7 @@ exports.verifyOTP = async (req, res) => {
 };
 
 // =======================
-// LOGIN (UNCHANGED ✅)
+// LOGIN ✅ (UPGRADED ONLY FOR GOOGLE USERS)
 // =======================
 exports.login = async (req, res) => {
   try {
@@ -149,10 +145,15 @@ exports.login = async (req, res) => {
       });
     }
 
-    // ✅ If user is Google user, block email/password login
-    if (user.isGoogleUser) {
+    /**
+     * ✅ IMPORTANT FIX:
+     * Google user can login via Email system ONLY if they have set a real password.
+     * If password is still "GOOGLE_AUTH" => block email login
+     */
+    if (user.isGoogleUser && user.password === "GOOGLE_AUTH") {
       return res.status(403).json({
-        message: "This account uses Google Login. Please sign in with Google.",
+        message:
+          "This account was created using Google. Please login with Google OR set a password first.",
       });
     }
 
@@ -177,7 +178,7 @@ exports.login = async (req, res) => {
 };
 
 // =======================
-// GOOGLE LOGIN CALLBACK (UNCHANGED redirect ✅)
+// GOOGLE LOGIN CALLBACK (UNCHANGED ✅)
 // =======================
 exports.googleCallback = (req, res) => {
   if (!req.user) {
@@ -191,12 +192,11 @@ exports.googleCallback = (req, res) => {
   const frontendURL =
     process.env.FRONTEND_URL || "https://rebuzzar-frontend.onrender.com";
 
-  // ✅ Frontend will check /me and redirect to complete profile if needed
   res.redirect(`${frontendURL}/google-auth-success?token=${token}`);
 };
 
 // ======================================================
-// ✅ NEW: SEND OTP FOR GOOGLE USER (email OTP like normal)
+// ✅ SEND OTP FOR GOOGLE USER
 // ======================================================
 exports.sendGoogleOTP = async (req, res) => {
   try {
@@ -209,7 +209,6 @@ exports.sendGoogleOTP = async (req, res) => {
       return res.status(400).json({ message: "Not a Google user" });
     }
 
-    // ✅ If already verified, don't resend
     if (user.isVerified) {
       return res.json({ message: "Already verified" });
     }
@@ -239,9 +238,9 @@ exports.sendGoogleOTP = async (req, res) => {
   }
 };
 
-// =========================================
-// ✅ NEW: VERIFY OTP FOR GOOGLE USER (email)
-// =========================================
+// ======================================================
+// ✅ VERIFY OTP FOR GOOGLE USER
+// ======================================================
 exports.verifyGoogleOTP = async (req, res) => {
   try {
     const userId = req.user.id;
@@ -277,9 +276,9 @@ exports.verifyGoogleOTP = async (req, res) => {
   }
 };
 
-// =================================================
-// ✅ NEW: COMPLETE GOOGLE PROFILE (after OTP verify)
-// =================================================
+// ======================================================
+// ✅ COMPLETE GOOGLE PROFILE
+// ======================================================
 exports.completeGoogleProfile = async (req, res) => {
   try {
     const userId = req.user.id;
@@ -309,8 +308,8 @@ exports.completeGoogleProfile = async (req, res) => {
     user.department = department;
     user.year = year;
     user.studentCode = studentCode || "";
-
     user.isProfileComplete = true;
+
     await user.save();
 
     const { password, ...userData } = user.toObject();
@@ -322,6 +321,49 @@ exports.completeGoogleProfile = async (req, res) => {
   } catch (err) {
     console.error("COMPLETE GOOGLE PROFILE ERROR:", err);
     res.status(500).json({ message: "Failed to complete profile" });
+  }
+};
+
+// ======================================================
+// ✅ SET PASSWORD (NEW ✅)
+// Google user can now login via Email system too
+// ======================================================
+exports.setPassword = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { password } = req.body;
+
+    if (!password || password.length < 6) {
+      return res
+        .status(400)
+        .json({ message: "Password must be at least 6 characters" });
+    }
+
+    const user = await User.findById(userId);
+    if (!user) return res.status(404).json({ message: "User not found" });
+
+    // ✅ Only for Google users
+    if (!user.isGoogleUser) {
+      return res.status(400).json({
+        message: "This account already uses email/password login.",
+      });
+    }
+
+    // ✅ hash and store password
+    const hashedPassword = await bcrypt.hash(password, 10);
+    user.password = hashedPassword;
+
+    // ✅ Now allow Email login too
+    user.isGoogleUser = false;
+
+    await user.save();
+
+    res.json({
+      message: "Password set successfully ✅ Now you can login using Email too.",
+    });
+  } catch (err) {
+    console.error("SET PASSWORD ERROR:", err);
+    res.status(500).json({ message: "Failed to set password" });
   }
 };
 
@@ -338,13 +380,6 @@ exports.forgotPassword = async (req, res) => {
 
     const user = await User.findOne({ email });
     if (!user) return res.json({ message: "If account exists, link sent." });
-
-    // ✅ Block password reset for Google accounts
-    if (user.isGoogleUser) {
-      return res.json({
-        message: "This account uses Google Login. Please sign in with Google.",
-      });
-    }
 
     const rawToken = crypto.randomBytes(32).toString("hex");
     const hashed = crypto.createHash("sha256").update(rawToken).digest("hex");
@@ -385,13 +420,6 @@ exports.resetPassword = async (req, res) => {
 
     if (!user) {
       return res.status(400).json({ message: "Invalid or expired token" });
-    }
-
-    // ✅ Block reset password for Google accounts
-    if (user.isGoogleUser) {
-      return res.status(400).json({
-        message: "Google account password cannot be reset. Use Google login.",
-      });
     }
 
     user.password = await bcrypt.hash(req.body.password, 10);
