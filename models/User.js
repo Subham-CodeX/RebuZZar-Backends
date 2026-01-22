@@ -71,6 +71,13 @@ const UserSchema = new mongoose.Schema(
     emailOTP: { type: String },
     emailOTPExpires: { type: Date },
 
+    // ✅ ✅ NEW: Phone verification (MSG91 OTP)
+    phoneNumber: { type: String, default: "" },
+    isPhoneVerified: { type: Boolean, default: false },
+
+    // ✅ ✅ NEW: Fully Verified (Email Verified + Phone Verified)
+    isFullyVerified: { type: Boolean, default: false },
+
     // ✅ Password reset (unchanged)
     resetPasswordToken: { type: String },
     resetPasswordExpires: { type: Date },

@@ -6,7 +6,7 @@ const validator = require("validator");
 const sendBrevoEmail = require("../utils/brevoEmail");
 
 // =======================
-// SIGNUP (UNCHANGED ✅)
+// SIGNUP (UPGRADED ✅ ONLY FOR PHONE FLAGS)
 // =======================
 exports.signup = async (req, res) => {
   try {
@@ -58,6 +58,11 @@ exports.signup = async (req, res) => {
 
       isGoogleUser: false,
       isProfileComplete: true,
+
+      // ✅ NEW (Mobile verification flags - MSG91)
+      phoneNumber: "",
+      isPhoneVerified: false,
+      isFullyVerified: false,
     });
 
     sendBrevoEmail({
@@ -84,7 +89,7 @@ exports.signup = async (req, res) => {
 };
 
 // =======================
-// VERIFY OTP (UNCHANGED ✅)
+// VERIFY OTP (UPGRADED ✅ FOR FULLY VERIFIED FLAG)
 // =======================
 exports.verifyOTP = async (req, res) => {
   try {
@@ -110,6 +115,9 @@ exports.verifyOTP = async (req, res) => {
       user.isProfileComplete = true;
     }
 
+    // ✅ NEW: Fully Verified = Email Verified + Phone Verified
+    user.isFullyVerified = user.isVerified && user.isPhoneVerified;
+
     await user.save();
 
     const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, {
@@ -130,7 +138,7 @@ exports.verifyOTP = async (req, res) => {
 };
 
 // =======================
-// LOGIN ✅ (UPGRADED ONLY FOR GOOGLE USERS)
+// LOGIN ✅ (UNCHANGED ✅)
 // =======================
 exports.login = async (req, res) => {
   try {
@@ -196,7 +204,7 @@ exports.googleCallback = (req, res) => {
 };
 
 // ======================================================
-// ✅ SEND OTP FOR GOOGLE USER
+// ✅ SEND OTP FOR GOOGLE USER (UNCHANGED ✅)
 // ======================================================
 exports.sendGoogleOTP = async (req, res) => {
   try {
@@ -239,7 +247,7 @@ exports.sendGoogleOTP = async (req, res) => {
 };
 
 // ======================================================
-// ✅ VERIFY OTP FOR GOOGLE USER
+// ✅ VERIFY OTP FOR GOOGLE USER (UPGRADED ✅ FOR FULLY VERIFIED FLAG)
 // ======================================================
 exports.verifyGoogleOTP = async (req, res) => {
   try {
@@ -267,6 +275,10 @@ exports.verifyGoogleOTP = async (req, res) => {
     user.isVerified = true;
     user.emailOTP = undefined;
     user.emailOTPExpires = undefined;
+
+    // ✅ NEW: Fully Verified = Email Verified + Phone Verified
+    user.isFullyVerified = user.isVerified && user.isPhoneVerified;
+
     await user.save();
 
     res.json({ message: "Email verified successfully" });
@@ -277,7 +289,7 @@ exports.verifyGoogleOTP = async (req, res) => {
 };
 
 // ======================================================
-// ✅ COMPLETE GOOGLE PROFILE
+// ✅ COMPLETE GOOGLE PROFILE (UNCHANGED ✅)
 // ======================================================
 exports.completeGoogleProfile = async (req, res) => {
   try {
@@ -325,8 +337,7 @@ exports.completeGoogleProfile = async (req, res) => {
 };
 
 // ======================================================
-// ✅ SET PASSWORD (NEW ✅)
-// Google user can now login via Email system too
+// ✅ SET PASSWORD (UNCHANGED ✅)
 // ======================================================
 exports.setPassword = async (req, res) => {
   try {

@@ -81,6 +81,7 @@ app.get('/', (req, res) => {
 // ROUTES
 // ----------------------------
 app.use('/api/auth', require('./routes/auth.routes'));
+app.use("/api/phone-otp", require("./routes/phoneOtp.routes"));
 app.use('/api/products', require('./routes/product.routes'));
 app.use('/api/cart', require('./routes/cart.routes'));
 app.use('/api/bookings', require('./routes/booking.routes'));
